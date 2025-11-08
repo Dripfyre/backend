@@ -38,13 +38,7 @@ module.exports = {
     apiKey: process.env.DEEPGRAM_API_KEY,
   },
 
-  // Sarvam AI (Indian AI - Primary for transcription)
-  sarvam: {
-    apiKey: process.env.SARVAM_API_KEY,
-    apiUrl: process.env.SARVAM_API_URL || 'https://api.sarvam.ai',
-  },
-
-  // Imagen 3 uses same Google API key as Gemini
+  // Imagen 4 uses same Google API key as Gemini
   imagen: {
     apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
   },

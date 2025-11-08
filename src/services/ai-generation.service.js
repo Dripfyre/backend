@@ -4,16 +4,16 @@ const logger = require('../utils/logger');
 
 class AIGenerationService {
   constructor() {
-    // Use Google Imagen 3 (NanoBanana) for image generation
+    // Use Google Imagen 4 (NanoBanana) for image generation
     this.imagenService = imagenService;
   }
 
 
   /**
-   * Generate image using Google Imagen 3 (NanoBanana)
+   * Generate image using Google Imagen 4 (NanoBanana)
    */
   async generateImage(prompt, options = {}) {
-    const { aspectRatio = '1:1', style = 'default', numberOfImages = 1 } = options;
+    const { aspectRatio = '4:5', style = 'default', numberOfImages = 1 } = options;
 
     try {
       if (!this.imagenService.isConfigured()) {
@@ -27,18 +27,6 @@ class AIGenerationService {
       });
     } catch (error) {
       logger.error('Image generation error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate multiple variations
-   */
-  async generateVariations(prompt, count = 3, options = {}) {
-    try {
-      return await this.imagenService.generateVariations(prompt, count, options);
-    } catch (error) {
-      logger.error('Image variations error:', error);
       throw error;
     }
   }

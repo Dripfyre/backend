@@ -1,67 +1,62 @@
-const axios = require('axios');
+const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
 const logger = require('../utils/logger');
 
 class ImagenService {
   constructor() {
     this.apiKey = config.imagen.apiKey;
-    this.apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict';
+    this.client = new GoogleGenAI({ apiKey: this.apiKey });
   }
 
   /**
-   * Generate image using Google Imagen 3 (NanoBanana)
+   * Generate image using Google Imagen 4 (NanoBanana)
    */
   async generateImage(prompt, options = {}) {
     try {
       const {
-        aspectRatio = '1:1',
-        style = 'default',
         numberOfImages = 1,
+        aspectRatio = '4:5',
       } = options;
 
-      // Enhance prompt with style
-      const enhancedPrompt = this.enhancePromptWithStyle(prompt, style);
+      logger.info('Generating image with Imagen 4', {
+        prompt: prompt.substring(0, 50),
+        numberOfImages,
+        aspectRatio,
+      });
 
-      // Convert aspect ratio to Imagen format
-      const imagenAspectRatio = this.convertAspectRatio(aspectRatio);
+      // Use the correct Google GenAI SDK method
+      const response = await this.client.models.generateImages({
+        model: 'imagen-4.0-generate-001',
+        prompt: prompt,
+        numberOfImages: numberOfImages,
+        aspectRatio: aspectRatio,
+      });
 
-      const requestBody = {
-        prompt: enhancedPrompt,
-        number_of_images: numberOfImages,
-        aspect_ratio: imagenAspectRatio,
-        safety_filter_level: 'block_some',
-        person_generation: 'allow_adult',
-      };
+      // Process generated images
+      const images = response.generatedImages.map((generatedImage) => {
+        const imageBytes = generatedImage.image.imageBytes;
+        const base64Image = Buffer.from(imageBytes, 'base64').toString('base64');
+        
+        return {
+          url: `data:image/png;base64,${base64Image}`,
+          imageBytes: imageBytes,
+          mimeType: 'image/png',
+        };
+      });
 
-      const response = await axios.post(
-        `${this.apiUrl}?key=${this.apiKey}`,
-        requestBody,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 60000, // 60 seconds
-        }
-      );
-
-      const images = response.data.predictions.map(pred => ({
-        url: pred.image_url || `data:image/png;base64,${pred.bytesBase64Encoded}`,
-        mimeType: pred.mimeType || 'image/png',
-      }));
-
-      logger.info('Imagen 3 generation successful', {
+      logger.info('Imagen 4 generation successful', {
         prompt: prompt.substring(0, 50),
         numberOfImages: images.length,
       });
 
       return {
         images,
-        provider: 'imagen-3',
-        model: 'imagen-3.0-generate-001',
+        provider: 'imagen-4',
+        model: 'imagen-4.0-generate-001',
       };
     } catch (error) {
-      logger.error('Imagen 3 generation error:', error.response?.data || error.message);
-      throw new Error(`Failed to generate image with Imagen 3: ${error.message}`);
+      logger.error('Imagen 4 generation error:', error);
+      throw new Error(`Failed to generate image with Imagen 4: ${error.message}`);
     }
   }
 
@@ -87,39 +82,6 @@ class ImagenService {
   }
 
   /**
-   * Convert aspect ratio to Imagen format
-   */
-  convertAspectRatio(aspectRatio) {
-    const ratioMap = {
-      '1:1': '1:1',      // Square
-      '16:9': '16:9',    // Landscape
-      '9:16': '9:16',    // Portrait
-      '4:3': '4:3',      // Landscape
-      '3:4': '3:4',      // Portrait
-      '4:5': '4:5',      // Portrait (Instagram)
-    };
-
-    return ratioMap[aspectRatio] || '1:1';
-  }
-
-  /**
-   * Enhance prompt with style
-   */
-  enhancePromptWithStyle(prompt, style) {
-    const styleEnhancements = {
-      aesthetic: ', aesthetic, soft lighting, pastel colors, dreamy atmosphere, instagram aesthetic, visually pleasing',
-      minimal: ', minimalist, clean, simple, modern, white space, elegant, uncluttered',
-      vibrant: ', vibrant colors, bold, energetic, colorful, eye-catching, dynamic, saturated',
-      photorealistic: ', photorealistic, high quality, detailed, professional photography, realistic',
-      artistic: ', artistic, creative, unique, expressive, stylized',
-      default: ', high quality, professional, well-composed',
-    };
-
-    const enhancement = styleEnhancements[style] || styleEnhancements.default;
-    return `${prompt}${enhancement}`;
-  }
-
-  /**
    * Generate multiple variations of an image
    */
   async generateVariations(prompt, count = 3, options = {}) {
@@ -131,191 +93,197 @@ class ImagenService {
 
       return result;
     } catch (error) {
-      logger.error('Imagen 3 variations error:', error);
+      logger.error('Imagen 4 variations error:', error);
       throw error;
     }
   }
 
   /**
-   * Edit image with prompt using Imagen 3 (image-to-image editing)
+   * Edit image using Gemini Vision + Imagen 4 generation
+   * 
+   * Uses a conservative approach:
+   * 1. Gemini Vision analyzes the entire image in detail
+   * 2. Creates a comprehensive prompt that describes everything in the original
+   * 3. Adds ONLY the specific requested change
+   * 4. Imagen 4 generates a new image that preserves all unchanged elements
+   * 
+   * This ensures minimal changes - only what's explicitly requested is modified.
    */
   async editImage(imageBuffer, editPrompt, options = {}) {
     try {
       const {
-        aspectRatio = '1:1',
-        style = 'default',
-        strength = 0.7, // How much to change (0.0 - 1.0)
+        aspectRatio = '4:5',
       } = options;
 
-      logger.info('Editing image with Imagen 3', { 
+      logger.info('Editing image with Gemini Vision + Imagen 4 (conservative mode)', { 
         prompt: editPrompt.substring(0, 50),
-        style,
         aspectRatio 
-      });
-
-      // Enhance edit prompt with style
-      const enhancedPrompt = this.enhanceEditPrompt(editPrompt, style);
-
-      // Convert image buffer to base64
-      const base64Image = imageBuffer.toString('base64');
-
-      // Convert aspect ratio
-      const imagenAspectRatio = this.convertAspectRatio(aspectRatio);
-
-      const requestBody = {
-        prompt: enhancedPrompt,
-        image: {
-          bytesBase64Encoded: base64Image,
-        },
-        number_of_images: 1,
-        aspect_ratio: imagenAspectRatio,
-        edit_mode: 'inpainting-insert', // or 'product-image', 'outpainting'
-        safety_filter_level: 'block_some',
-        person_generation: 'allow_adult',
-      };
-
-      const response = await axios.post(
-        `${this.apiUrl}?key=${this.apiKey}`,
-        requestBody,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          timeout: 90000, // 90 seconds for editing
-        }
-      );
-
-      const editedImage = response.data.predictions[0];
-      const imageData = editedImage.image_url 
-        ? editedImage.image_url 
-        : `data:image/png;base64,${editedImage.bytesBase64Encoded}`;
-
-      logger.info('Imagen 3 editing successful');
-
-      return {
-        imageUrl: imageData,
-        imageBuffer: editedImage.bytesBase64Encoded 
-          ? Buffer.from(editedImage.bytesBase64Encoded, 'base64')
-          : null,
-        mimeType: editedImage.mimeType || 'image/png',
-        provider: 'imagen-3',
-        model: 'imagen-3.0-generate-001',
-        editPrompt: enhancedPrompt,
-      };
-    } catch (error) {
-      logger.error('Imagen 3 editing error:', error.response?.data || error.message);
-      throw new Error(`Failed to edit image with Imagen 3: ${error.message}`);
-    }
-  }
-
-  /**
-   * Edit image using Gemini with vision (NanoBanana approach)
-   * This uses Gemini's multimodal capabilities for more natural editing
-   */
-  async editImageWithGemini(imageBuffer, editPrompt, options = {}) {
-    try {
-      const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
-      const { HumanMessage } = require('@langchain/core/messages');
-
-      logger.info('Editing image with Gemini (NanoBanana)', { 
-        prompt: editPrompt.substring(0, 50) 
-      });
-
-      // Initialize Gemini with vision
-      const geminiVision = new ChatGoogleGenerativeAI({
-        apiKey: this.apiKey,
-        modelName: 'imagen-4.0-generate-001',
-        temperature: 0.3,
       });
 
       // Convert image to base64
       const base64Image = imageBuffer.toString('base64');
-      const mimeType = 'image/jpeg'; // Adjust based on actual image type
+      
+      // Detect mime type
+      const mimeType = this.detectMimeType(imageBuffer);
 
-      // Create editing instruction prompt
-      const fullPrompt = `You are an expert image editor. Analyze this image and describe the exact edits needed to: ${editPrompt}
+      // Create analysis prompt for Gemini - very conservative editing
+      const analysisPrompt = `You are an expert image analyst. Analyze this image in detail.
 
-Return a detailed prompt that can be used to regenerate this image with the requested edits applied. Include:
-1. Current image description
-2. Requested modifications
-3. Style and mood to maintain
-4. Technical details (lighting, colors, composition)
+User wants to edit ONLY this: "${editPrompt}"
 
-Keep the essence of the original but apply the edits naturally.`;
+CRITICAL INSTRUCTIONS:
+1. Keep EVERYTHING exactly the same EXCEPT for the specific edit requested: ${editPrompt}
+2. The edit should be MINIMAL and PRECISE - change ONLY what was asked
+3. All other elements must remain IDENTICAL - same positions, same colors, same objects, same style, same composition
+4. Be very specific about what stays the same and what changes
 
-      // Analyze image with Gemini
-      const response = await geminiVision.invoke([
-        new HumanMessage({
-          content: [
-            {
-              type: 'text',
-              text: fullPrompt,
-            },
-            {
-              type: 'image_url',
-              image_url: `data:${mimeType};base64,${base64Image}`,
-            },
-          ],
-        }),
-      ]);
+Example: If user says "make it brighter", describe the entire scene but add "with increased brightness and enhanced lighting"
 
-      // Get the enhanced prompt from Gemini
-      const enhancedEditPrompt = response.content;
-      logger.info('Gemini generated edit prompt:', enhancedEditPrompt);
+Create a detailed image generation prompt that preserves the original image while applying ONLY the requested edit.
+Return ONLY the generation prompt, no explanation. Be detailed to ensure accuracy.`;
 
-      // Now generate the edited image using Imagen 3
-      const result = await this.generateImage(enhancedEditPrompt, {
-        aspectRatio: options.aspectRatio || '1:1',
-        style: options.style || 'photorealistic',
-        numberOfImages: 1,
+      // Analyze image with Gemini (using same client instance)
+      const response = await this.client.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [
+          {
+            parts: [
+              { text: analysisPrompt },
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Image
+                }
+              }
+            ]
+          }
+        ],
+        config: {
+          temperature: 0,  // Deterministic output for consistency
+          maxOutputTokens: 1024,  // Allow detailed description for accuracy
+        }
       });
 
-      return {
-        imageUrl: result.images[0].url,
-        imageBuffer: null, // Will need to fetch if needed
-        mimeType: result.images[0].mimeType,
-        provider: 'gemini-vision + imagen-3',
-        model: 'gemini-2.5-pro + imagen-3',
-        originalPrompt: editPrompt,
-        enhancedPrompt: enhancedEditPrompt,
-      };
+      const enhancedPrompt = response.text.trim();
+      console.log("🚀 ~ ImagenService ~ editImage ~ enhancedPrompt:", enhancedPrompt)
+      logger.info('Gemini generated conservative edit prompt:', { 
+        originalRequest: editPrompt,
+        promptLength: enhancedPrompt.length,
+        promptPreview: enhancedPrompt.substring(0, 150)
+      });
+
+      // Now generate new image with enhanced prompt using Imagen 4
+      // Try to use reference image if supported by the API
+      try {
+        logger.info('Attempting image-to-image editing with reference image');
+        
+        // Try to pass reference image to Imagen 4 for better preservation
+        const response = await this.client.models.generateContent({
+          model: "gemini-2.5-flash-image",
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Image
+                  }
+                }
+              ]
+            }
+          ],
+        });
+
+        // Process generated image
+        const imageBytes = response.generatedImages[0].image.imageBytes;
+        const generatedBase64 = Buffer.from(imageBytes, 'base64').toString('base64');
+        
+        const result = {
+          images: [{
+            url: `data:image/png;base64,${generatedBase64}`,
+            imageBytes: imageBytes,
+            mimeType: 'image/png',
+          }],
+          provider: 'imagen-4',
+          model: 'imagen-4.0-generate-001',
+        };
+
+        logger.info('Image-to-image editing with reference image successful');
+        
+        return {
+          imageUrl: result.images[0].url,
+          imageBuffer: result.images[0].imageBytes ? Buffer.from(result.images[0].imageBytes, 'base64') : null,
+          mimeType: result.images[0].mimeType,
+          provider: 'gemini-vision + imagen-4-reference',
+          model: 'gemini-2.0-flash + imagen-4.0-generate-001',
+          editPrompt: enhancedPrompt,
+        };
+      } catch (referenceError) {
+        logger.warn('Reference image not supported, falling back to text-to-image:', referenceError.message);
+        
+        // Fallback to text-only generation
+        const result = await this.generateImage(enhancedPrompt, {
+          aspectRatio,
+          numberOfImages: 1,
+        });
+        
+        logger.info('Conservative image editing completed (text-to-image fallback)');
+        
+        return {
+          imageUrl: result.images[0].url,
+          imageBuffer: result.images[0].imageBytes ? Buffer.from(result.images[0].imageBytes, 'base64') : null,
+          mimeType: result.images[0].mimeType,
+          provider: 'gemini-vision + imagen-4',
+          model: 'gemini-2.0-flash + imagen-4.0-generate-001',
+          editPrompt: enhancedPrompt,
+        };
+      }
     } catch (error) {
-      logger.error('Gemini image editing error:', error);
-      throw new Error(`Failed to edit image with Gemini: ${error.message}`);
+      logger.error('Image editing error:', error);
+      throw new Error(`Failed to edit image: ${error.message}`);
     }
   }
 
   /**
-   * Enhance edit prompt with context
+   * Detect MIME type from image buffer
    */
-  enhanceEditPrompt(prompt, style) {
-    const styleEnhancements = {
-      aesthetic: ' with soft aesthetic lighting, dreamy atmosphere, instagram quality',
-      minimal: ' in a clean minimalist style, simple and modern',
-      vibrant: ' with vibrant colors, bold and energetic',
-      photorealistic: ' maintaining photorealistic quality, natural and realistic',
-      artistic: ' with artistic flair, creative and expressive',
-      default: ' maintaining high quality and natural look',
-    };
+  detectMimeType(buffer) {
+    if (!buffer || buffer.length < 4) {
+      return 'image/jpeg';
+    }
 
-    const enhancement = styleEnhancements[style] || styleEnhancements.default;
-    return `${prompt}${enhancement}`;
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+      return 'image/jpeg';
+    }
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+      return 'image/png';
+    }
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+      return 'image/gif';
+    }
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
+      return 'image/webp';
+    }
+
+    return 'image/jpeg';
   }
 
+
   /**
-   * Upscale image (if available)
+   * Upscale/enhance image quality
    */
   async upscaleImage(imageBuffer, options = {}) {
     try {
-      // For now, use image editing with upscale prompt
+      // Use Gemini Vision + Imagen to recreate with higher quality
       return await this.editImage(
         imageBuffer,
-        'Enhance image quality, increase resolution, sharpen details, maintain original composition',
-        { ...options, style: 'photorealistic' }
+        'Enhance image quality, sharpen details, improve clarity while maintaining exact composition',
+        options
       );
     } catch (error) {
       logger.error('Image upscaling error:', error);
-      throw new Error('Image upscaling not yet fully implemented for Imagen 3');
+      throw error;
     }
   }
 

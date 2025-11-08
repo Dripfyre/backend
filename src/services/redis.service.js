@@ -98,6 +98,73 @@ class RedisService {
     }
   }
 
+  /**
+   * Add item to sorted set (for timeline)
+   * Score is typically timestamp for chronological ordering
+   */
+  async zadd(key, score, member) {
+    try {
+      await this.client.zadd(key, score, member);
+      return true;
+    } catch (error) {
+      logger.error(`Error adding to sorted set ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get items from sorted set in reverse order (newest first)
+   * with pagination support
+   */
+  async zrevrange(key, start, stop, withScores = false) {
+    try {
+      if (withScores) {
+        return await this.client.zrevrange(key, start, stop, 'WITHSCORES');
+      }
+      return await this.client.zrevrange(key, start, stop);
+    } catch (error) {
+      logger.error(`Error getting range from sorted set ${key}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get total count of items in sorted set
+   */
+  async zcard(key) {
+    try {
+      return await this.client.zcard(key);
+    } catch (error) {
+      logger.error(`Error getting count from sorted set ${key}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Remove item from sorted set
+   */
+  async zrem(key, member) {
+    try {
+      await this.client.zrem(key, member);
+      return true;
+    } catch (error) {
+      logger.error(`Error removing from sorted set ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get item score from sorted set
+   */
+  async zscore(key, member) {
+    try {
+      return await this.client.zscore(key, member);
+    } catch (error) {
+      logger.error(`Error getting score from sorted set ${key}:`, error);
+      return null;
+    }
+  }
+
   async disconnect() {
     if (this.client) {
       await this.client.quit();

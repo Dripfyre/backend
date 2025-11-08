@@ -35,7 +35,7 @@ const imageGenerationSchema = Joi.object({
   sessionId: Joi.string().uuid().required(),
   prompt: Joi.string().required(),
   style: Joi.string().valid('aesthetic', 'minimal', 'vibrant', 'default').default('default'),
-  aspectRatio: Joi.string().valid('1:1', '9:16', '16:9', '4:5').default('1:1'),
+  aspectRatio: Joi.string().valid('1:1', '9:16', '16:9', '4:5').default('4:5'),
 });
 
 // Validation middleware factory

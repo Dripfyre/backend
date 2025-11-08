@@ -5,6 +5,7 @@ const { uploadMultiple } = require('../middleware/upload.middleware');
 const { uploadLimiter, strictLimiter } = require('../middleware/rateLimit.middleware');
 const uploadController = require('../controllers/upload.controller');
 const mvpController = require('../controllers/mvp.controller');
+const postController = require('../controllers/post.controller');
 
 // MVP API - Simple 3 endpoints
 
@@ -43,6 +44,49 @@ router.get(
   '/:sessionId/sync',
   validateSession,
   mvpController.syncStatus
+);
+
+/**
+ * 4. POST API
+ * Store user post data (name, timestamp, sessionId)
+ * POST /:sessionId/post
+ */
+router.post(
+  '/:sessionId/post',
+  validateSession,
+  postController.createPost
+);
+
+/**
+ * 5. GET POST API
+ * Get single post by sessionId
+ * GET /:sessionId/post
+ */
+router.get(
+  '/:sessionId/post',
+  validateSession,
+  postController.getPost
+);
+
+/**
+ * 6. DELETE POST API
+ * Delete post by sessionId
+ * DELETE /:sessionId/post
+ */
+router.delete(
+  '/:sessionId/post',
+  validateSession,
+  postController.deletePost
+);
+
+/**
+ * 7. TIMELINE API
+ * Get paginated timeline of all posts sorted by timestamp (newest first)
+ * GET /timeline?page=1&limit=10
+ */
+router.get(
+  '/timeline',
+  postController.getTimeline
 );
 
 module.exports = router;

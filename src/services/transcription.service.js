@@ -1,75 +1,20 @@
 const { createClient } = require('@deepgram/sdk');
 const OpenAI = require('openai');
-const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 
 class TranscriptionService {
   constructor() {
-    // Initialize Sarvam AI (primary - for all languages)
-    if (config.sarvam && config.sarvam.apiKey) {
-      this.sarvamApiKey = config.sarvam.apiKey;
-      this.sarvamApiUrl = config.sarvam.apiUrl;
-    }
-
-    // Initialize Deepgram (fallback)
+    // Initialize Deepgram (primary)
     if (config.deepgram && config.deepgram.apiKey) {
       this.deepgram = createClient(config.deepgram.apiKey);
     }
 
-    // Initialize OpenAI Whisper (final fallback)
+    // Initialize OpenAI Whisper (fallback)
     if (config.openai && config.openai.apiKey) {
       this.openai = new OpenAI({
         apiKey: config.openai.apiKey,
       });
-    }
-  }
-
-  /**
-   * Transcribe audio using Sarvam AI
-   */
-  async transcribeWithSarvam(audioBuffer, options = {}) {
-    try {
-      const {
-        language = 'en-IN', // Default to Indian English
-        model = 'saaras:v1',
-      } = options;
-
-      // Convert buffer to base64
-      const audioBase64 = audioBuffer.toString('base64');
-
-      const response = await axios.post(
-        `${this.sarvamApiUrl}/speech-to-text`,
-        {
-          audio: audioBase64,
-          language_code: language,
-          model: model,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.sarvamApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000, // 30 second timeout
-        }
-      );
-
-      const transcript = response.data.transcript;
-
-      logger.info('Sarvam AI transcription successful', {
-        language,
-        transcriptLength: transcript.length,
-      });
-      
-      return {
-        transcript,
-        confidence: response.data.confidence || null,
-        language: response.data.language_code || language,
-        provider: 'sarvam',
-      };
-    } catch (error) {
-      logger.error('Sarvam AI transcription error:', error.response?.data || error.message);
-      throw error;
     }
   }
 
@@ -134,58 +79,30 @@ class TranscriptionService {
   }
 
   /**
-   * Detect language preference from options or transcript
-   */
-  detectLanguageCode(options = {}) {
-    const { language, autoDetect } = options;
-    
-    // If language explicitly provided, use it
-    if (language) return language;
-    
-    // Default to Indian English (works great for all English + understands Hinglish)
-    return 'en-IN';
-  }
-
-  /**
    * Transcribe audio (auto-select provider)
-   * Priority: Sarvam AI (all languages) -> Deepgram -> Whisper
+   * Priority: Deepgram (primary) -> Whisper (fallback)
    */
   async transcribe(audioBuffer, options = {}) {
-    const {
-      useWhisper = false,
-      useDeepgram = false,
-      language = null,
-    } = options;
+    const { useWhisper = false } = options;
 
     try {
-      // Priority 1: Sarvam AI (primary for all languages including English)
-      if (this.sarvamApiKey && !useWhisper && !useDeepgram) {
-        try {
-          const languageCode = this.detectLanguageCode({ language });
-          logger.info(`Attempting Sarvam AI transcription with language: ${languageCode}`);
-          return await this.transcribeWithSarvam(audioBuffer, { language: languageCode });
-        } catch (error) {
-          logger.warn('Sarvam AI failed, trying next provider:', error.message);
-        }
-      }
-
-      // Priority 2: Deepgram (fallback)
+      // Priority 1: Deepgram (primary)
       if (this.deepgram && !useWhisper) {
         try {
           logger.info('Attempting Deepgram transcription');
           return await this.transcribeWithDeepgram(audioBuffer);
         } catch (error) {
-          logger.warn('Deepgram failed, trying next provider:', error.message);
+          logger.warn('Deepgram failed, trying Whisper fallback:', error.message);
         }
       }
 
-      // Priority 3: OpenAI Whisper (final fallback)
+      // Priority 2: OpenAI Whisper (fallback)
       if (this.openai) {
         logger.info('Attempting OpenAI Whisper transcription');
         return await this.transcribeWithWhisper(audioBuffer);
       }
 
-      throw new Error('No transcription service available. Please configure at least one: SARVAM_API_KEY, DEEPGRAM_API_KEY, or OPENAI_API_KEY');
+      throw new Error('No transcription service available. Please configure DEEPGRAM_API_KEY or OPENAI_API_KEY');
     } catch (error) {
       logger.error('Transcription error:', error);
       throw error;
