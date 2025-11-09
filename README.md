@@ -685,6 +685,7 @@ Built by passionate developers who understand the creator economy. We're combini
 - 📧 Email: team@dripfyre.com
 - 🌐 Website: [dripfyre.com](https://dripfyre.com)
 - 💼 LinkedIn: [DripFyre](https://linkedin.com/company/dripfyre)
+- PitchDeck: https://app.presentations.ai/view/60qgIL1J3C
 
 ---
 
