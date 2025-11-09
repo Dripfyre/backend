@@ -26,22 +26,6 @@ class AIService {
       
       const result = {};
 
-      // Handle image generation (create new image)
-      if (intent.needsImageGeneration && intent.imagePrompt) {
-        logger.info('User wants to generate a new image');
-        const generatedImage = await this.generateImage(intent.imagePrompt);
-        result.generatedImage = generatedImage;
-        result.imageGenerated = true;
-        
-        // Also generate caption and hashtags for the new image
-        // Update imageData to use the generated image for caption/hashtag generation
-        if (generatedImage.imageUrl) {
-          // We'll generate caption/hashtags based on the prompt
-          intent.needsCaption = true;
-          intent.needsHashtags = true;
-        }
-      }
-
       // Handle image editing (modify existing image)
       if (intent.needsImageEditing && intent.imagePrompt && imageData?.buffer) {
         logger.info('User wants to edit the existing image');
@@ -51,7 +35,7 @@ class AIService {
       }
 
       // Generate caption and/or hashtags if needed
-      if (intent.needsCaption || intent.needsHashtags || (!intent.needsImageGeneration && !intent.needsImageEditing)) {
+      if (intent.needsCaption || intent.needsHashtags || !intent.needsImageEditing) {
         // Build prompt based on intent
         let prompt = '';
         
@@ -84,14 +68,14 @@ class AIService {
 
         // Call Gemini API for caption/hashtags
         const response = await this.client.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
+          model: 'gemini-2.5-flash',
           contents: [
             {
               parts: parts
             }
           ],
           config: {
-            temperature: 0,
+            temperature: 0.7,
             maxOutputTokens: 1024,
           }
         });
@@ -99,14 +83,14 @@ class AIService {
         const content = response.text || '';
 
         // Parse response based on intent
-        if (intent.needsCaption || (!intent.needsCaption && !intent.needsHashtags && !intent.needsImageGeneration && !intent.needsImageEditing)) {
+        if (intent.needsCaption || (!intent.needsCaption && !intent.needsHashtags && !intent.needsImageEditing)) {
           const captionMatch = content.match(/CAPTION:\s*(.+?)(?=HASHTAGS:|$)/s);
           if (captionMatch) {
             result.caption = this.cleanCaption(captionMatch[1].trim());
           }
         }
         
-        if (intent.needsHashtags || (!intent.needsCaption && !intent.needsHashtags && !intent.needsImageGeneration && !intent.needsImageEditing)) {
+        if (intent.needsHashtags || (!intent.needsCaption && !intent.needsImageEditing)) {
           const hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)$/s);
           if (hashtagsMatch) {
             const hashtags = this.cleanHashtags(hashtagsMatch[1].trim());
@@ -119,7 +103,6 @@ class AIService {
       logger.info('AI processing complete', {
         hasCaption: !!result.caption,
         hasHashtags: !!result.hashtags,
-        imageGenerated: !!result.imageGenerated,
         imageEdited: !!result.imageEdited,
       });
 
@@ -144,7 +127,6 @@ Analyze what the user wants and respond with ONLY a JSON object (no markdown, no
 {
   "needsCaption": true/false,
   "needsHashtags": true/false,
-  "needsImageGeneration": true/false,
   "needsImageEditing": true/false,
   "imagePrompt": "extracted prompt for image generation/editing if applicable",
   "reasoning": "brief explanation"
@@ -153,20 +135,17 @@ Analyze what the user wants and respond with ONLY a JSON object (no markdown, no
 Rules:
 - If user asks for "caption" or "description", set needsCaption to true
 - If user asks for "hashtags" or "tags", set needsHashtags to true
-- If user asks to "generate", "create new image", "make a picture of", set needsImageGeneration to true
-- If user asks to "edit image", "change the image", "update photo", "make it brighter", set needsImageEditing to true
+- If user asks to create a new image, "edit image", "change the image", "update photo", "make it brighter", set needsImageEditing to true
 - Extract the image description/edit request into imagePrompt field
 - If unclear or general request, set caption and hashtags to true (default)
 - Be intelligent about context:
   * "make it funnier" → likely caption
   * "Add trending tags" → hashtags
-  * "generate an image of a sunset" → needsImageGeneration with imagePrompt
   * "make the image brighter" → needsImageEditing with imagePrompt
-
 Respond with JSON only:`;
 
       const response = await this.client.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash',
         contents: [
           {
             parts: [{ text: intentPrompt }]
@@ -174,12 +153,12 @@ Respond with JSON only:`;
         ],
         config: {
           temperature: 0.3,
-          maxOutputTokens: 256,
+          maxOutputTokens: 2560,
+          responseMimeType: 'application/json',
         }
       });
 
       const content = response.text || '';
-      
       // Extract JSON from response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -188,7 +167,6 @@ Respond with JSON only:`;
         return {
           needsCaption: parsed.needsCaption || false,
           needsHashtags: parsed.needsHashtags || false,
-          needsImageGeneration: parsed.needsImageGeneration || false,
           needsImageEditing: parsed.needsImageEditing || false,
           imagePrompt: parsed.imagePrompt || '',
           reasoning: parsed.reasoning || '',
@@ -201,7 +179,6 @@ Respond with JSON only:`;
       return {
         needsCaption: true,
         needsHashtags: true,
-        needsImageGeneration: false,
         needsImageEditing: false,
         imagePrompt: '',
         reasoning: 'Fallback to default',
@@ -221,10 +198,6 @@ Respond with JSON only:`;
   parseIntentSimple(transcript) {
     const lower = transcript.toLowerCase();
     
-    // Detect image generation keywords
-    const imageGenKeywords = ['generate image', 'create image', 'new image', 'make a picture', 'generate a photo'];
-    const needsImageGeneration = imageGenKeywords.some(kw => lower.includes(kw));
-    
     // Detect image editing keywords
     const imageEditKeywords = ['edit image', 'change image', 'modify image', 'update image', 'brighter', 'darker', 'filter'];
     const needsImageEditing = imageEditKeywords.some(kw => lower.includes(kw));
@@ -232,9 +205,8 @@ Respond with JSON only:`;
     return {
       needsCaption: lower.includes('caption') || lower.includes('description'),
       needsHashtags: lower.includes('hashtag') || lower.includes('#') || lower.includes('tag'),
-      needsImageGeneration,
       needsImageEditing,
-      imagePrompt: needsImageGeneration || needsImageEditing ? transcript : '',
+      imagePrompt: needsImageEditing ? transcript : '',
       reasoning: 'Fallback keyword matching',
       rawTranscript: transcript,
     };
@@ -244,69 +216,89 @@ Respond with JSON only:`;
    * Build prompt for full content (caption + hashtags)
    */
   buildFullContentPrompt(transcript) {
-    return `You are a GenZ social media expert. Analyze the image and user request to create engaging content.
-
-User request: "${transcript}"
-
-Task: Generate a caption and hashtags for this Instagram post.
-
-Output Format (STRICTLY follow this):
-CAPTION: [Write an engaging caption based on the user's request. Include 2-3 relevant emojis. Keep it authentic and conversational.]
-HASHTAGS: [Write 5-7 relevant hashtags separated by spaces, all starting with #]
-
-Rules:
-- Analyze the image carefully
-- Follow the user's specific request
-- Use authentic GenZ voice (no forced slang)
-- Keep caption under 150 characters
-- Hashtags should be trending and relevant
-
-Generate now:`;
+    // Extract number of hashtags from transcript if specified
+    const numberMatch = transcript.match(/(\d+)\s+hashtag/i);
+    const requestedCount = numberMatch ? parseInt(numberMatch[1]) : null;
+    
+    let hashtagGuideline = '';
+    if (requestedCount) {
+      hashtagGuideline = `HASHTAGS: [EXACTLY ${requestedCount} trending, relevant hashtag${requestedCount > 1 ? 's' : ''} separated by spaces — all start with #]`;
+    } else {
+      hashtagGuideline = `HASHTAGS: [5-7 trending, relevant hashtags separated by spaces — all start with #]`;
+    }
+    
+    return `
+  You are a sharp, GenZ social media strategist who crafts viral Instagram content. 
+  The user has shared an image and a voice/text request below. 
+  Your task: analyze the image and request to produce a caption + hashtags that feel authentic, trendy, and emotionally aligned.
+  
+  USER REQUEST: "${transcript}"
+  
+  OUTPUT FORMAT (STRICT — do not add extra words, emojis, or explanations):
+  CAPTION: [short, catchy caption with 2-3 well-placed emojis — under 150 characters, use a natural GenZ tone, avoid clichés]
+  ${hashtagGuideline}
+  
+  GUIDELINES:
+  - Think like a GenZ creator: honest, expressive, sometimes witty but never forced.
+  - Relate caption to mood, vibe, or visual energy of the image.
+  - If the user's request implies emotion (chill, bold, romantic, aesthetic, etc.), reflect that in tone.
+  - Hashtags: match context and respect the requested number if specified (e.g. #vibes #aesthetic #chillmood).
+  - NEVER include markdown, quotes, or any text outside the specified format.
+  
+  Generate now:
+  `;
   }
+  
 
   /**
    * Build prompt for caption only
    */
   buildCaptionPrompt(transcript) {
-    return `You are a GenZ social media expert creating Instagram captions.
-
-User request: "${transcript}"
-
-Task: Generate ONLY a caption based on the user's request.
-
-Output Format:
-CAPTION: [Write the caption here with 2-3 emojis]
-
-Rules:
-- Analyze the image carefully
-- Follow the user's specific request exactly
-- Authentic and conversational tone
-- Keep under 150 characters
-
-Generate now:`;
+    return `
+  You are a GenZ social media copywriter known for writing short, punchy, and relatable Instagram captions. 
+  Analyze the image and follow the user's specific request.
+  
+  USER REQUEST: "${transcript}"
+  
+  OUTPUT FORMAT:
+  CAPTION: [2–3 emojis included, under 150 characters, authentic tone]
+  
+  GUIDELINES:
+  - Keep it conversational, playful, or emotionally real depending on vibe.
+  - Avoid marketing or robotic language.
+  - Match the caption style to what a 20-year-old creator would post.
+  - Reflect the user’s intent precisely (funny, aesthetic, emotional, sarcastic, etc.).
+  - Output only the CAPTION line.
+  
+  Generate now:
+  `;
   }
+  
 
   /**
    * Build prompt for hashtags only
    */
   buildHashtagPrompt(transcript) {
-    return `You are a GenZ social media expert creating Instagram hashtags.
-
-User request: "${transcript}"
-
-Task: Generate ONLY hashtags based on the user's request.
-
-Output Format:
-HASHTAGS: [Write 5-7 hashtags separated by spaces, all starting with #]
-
-Rules:
-- Analyze the image carefully
-- Follow the user's specific request exactly
-- Hashtags should be trending and relevant
-- Mix popular and niche tags
-
-Generate now:`;
+    
+    return `
+  You are a GenZ social media strategist specializing in creating trending Instagram hashtags.
+  
+  USER REQUEST: "${transcript}"
+  
+  TASK: Generate ONLY hashtags based on the user's request and the image analysis.
+  
+  OUTPUT FORMAT:
+  HASHTAGS: [Relevant hashtags separated by spaces, all starting with # — no numbering, no line breaks]
+  
+  GUIDELINES:
+  - Match hashtags to mood/tone (e.g., if it's travel: #wanderlust #sunsetvibes).
+  - Keep them lowercase and natural — no random or unrelated tags.
+  - DO NOT add any explanation or text other than the output format.
+  
+  Generate now:
+  `;
   }
+  
 
   /**
    * Generate caption and hashtags for uploaded image (fast generation)
@@ -335,29 +327,36 @@ Rules:
 
 Generate now:`;
 
-      const parts = [{ text: prompt }];
+    //   const parts = [{ text: prompt }];
       
-      if (imageData?.buffer) {
-        const base64Image = imageData.buffer.toString('base64');
-        const mimeType = imageData.mimeType || this.detectMimeType(imageData.buffer);
-        parts.push({
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Image
-          }
-        });
-      }
+    //   if (imageData?.buffer) {
+    //     const base64Image = imageData.buffer.toString('base64');
+    //     const mimeType = imageData.mimeType || this.detectMimeType(imageData.buffer);
+    //     parts.push({
+    //       inlineData: {
+    //         mimeType: mimeType,
+    //         data: base64Image
+    //       }
+    //     });
+    //   }
 
       const response = await this.client.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: "gemini-2.5-flash-image",
         contents: [
           {
-            parts: parts
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: imageData.mimeType,
+                  data: imageData.buffer.toString('base64'),
+                },
+              },
+            ]
           }
         ],
         config: {
-          temperature: 0.7,
-          maxOutputTokens: 512,
+          temperature: 0.7,  // Deterministic output for consistency
         }
       });
 
@@ -403,14 +402,6 @@ Generate now:`;
     const uniqueTags = [...new Set(tags)]
       .map(tag => tag.toLowerCase())
       .slice(0, 10);
-    
-    const defaultTags = ['#lifestyle', '#vibes', '#aesthetic', '#trending', '#foryou'];
-    while (uniqueTags.length < 5) {
-      const nextDefault = defaultTags[uniqueTags.length];
-      if (!uniqueTags.includes(nextDefault)) {
-        uniqueTags.push(nextDefault);
-      }
-    }
     
     return uniqueTags.join(' ');
   }

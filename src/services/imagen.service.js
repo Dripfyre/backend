@@ -82,23 +82,6 @@ class ImagenService {
   }
 
   /**
-   * Generate multiple variations of an image
-   */
-  async generateVariations(prompt, count = 3, options = {}) {
-    try {
-      const result = await this.generateImage(prompt, {
-        ...options,
-        numberOfImages: count,
-      });
-
-      return result;
-    } catch (error) {
-      logger.error('Imagen 4 variations error:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Edit image using Gemini Vision + Imagen 4 generation
    * 
    * Uses a conservative approach:
@@ -143,81 +126,90 @@ Create a detailed image generation prompt that preserves the original image whil
 Return ONLY the generation prompt, no explanation. Be detailed to ensure accuracy.`;
 
       // Analyze image with Gemini (using same client instance)
-      const response = await this.client.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [
-          {
-            parts: [
-              { text: analysisPrompt },
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: base64Image
-                }
-              }
-            ]
-          }
-        ],
-        config: {
-          temperature: 0,  // Deterministic output for consistency
-          maxOutputTokens: 1024,  // Allow detailed description for accuracy
-        }
-      });
+      // const response = await this.client.models.generateContent({
+      //   model: 'gemini-2.5-flash-image',
+      //   contents: [
+      //     {
+      //       parts: [
+      //         { text: analysisPrompt },
+      //         {
+      //           inlineData: {
+      //             mimeType: mimeType,
+      //             data: base64Image
+      //           }
+      //         }
+      //       ]
+      //     }
+      //   ],
+      //   config: {
+      //     temperature: 0,  // Deterministic output for consistency
+      //     maxOutputTokens: 1024,  // Allow detailed description for accuracy
+      //   }
+      // });
 
-      const enhancedPrompt = response.text.trim();
-      console.log("🚀 ~ ImagenService ~ editImage ~ enhancedPrompt:", enhancedPrompt)
-      logger.info('Gemini generated conservative edit prompt:', { 
-        originalRequest: editPrompt,
-        promptLength: enhancedPrompt.length,
-        promptPreview: enhancedPrompt.substring(0, 150)
-      });
+      const enhancedPrompt = analysisPrompt.trim();
+      // logger.info('Gemini generated conservative edit prompt:', { 
+      //   originalRequest: analysisPrompt,
+      //   promptLength: enhancedPrompt.length,
+      //   promptPreview: enhancedPrompt.substring(0, 150)
+      // });
 
       // Now generate new image with enhanced prompt using Imagen 4
       // Try to use reference image if supported by the API
       try {
         logger.info('Attempting image-to-image editing with reference image');
-        
-        // Try to pass reference image to Imagen 4 for better preservation
+
         const response = await this.client.models.generateContent({
           model: "gemini-2.5-flash-image",
           contents: [
             {
               parts: [
-                { text: prompt },
+                { text: editPrompt },
                 {
                   inlineData: {
                     mimeType: mimeType,
-                    data: base64Image
-                  }
-                }
+                    data: base64Image,
+                  },
+                },
               ]
             }
           ],
+          config: {
+            temperature: 0,  // Deterministic output for consistencyFv
+          },
         });
 
+        // Extract image from response - Gemini returns generated images in content parts
+        const contentParts = response.candidates[0]?.content?.parts || [];
+        const imagePart = contentParts.find(part => part.inlineData);
+        
+        if (!imagePart || !imagePart.inlineData) {
+          throw new Error('No generated image found in response');
+        }
+
         // Process generated image
-        const imageBytes = response.generatedImages[0].image.imageBytes;
-        const generatedBase64 = Buffer.from(imageBytes, 'base64').toString('base64');
+        const generatedBase64 = imagePart.inlineData.data;
+        const imageBytes = Buffer.from(generatedBase64, 'base64');
         
         const result = {
           images: [{
             url: `data:image/png;base64,${generatedBase64}`,
             imageBytes: imageBytes,
-            mimeType: 'image/png',
+            mimeType: imagePart.inlineData.mimeType || 'image/png',
           }],
-          provider: 'imagen-4',
-          model: 'imagen-4.0-generate-001',
+          provider: 'gemini-2.5-flash-image',
+          model: 'gemini-2.5-flash-image',
         };
 
         logger.info('Image-to-image editing with reference image successful');
         
         return {
           imageUrl: result.images[0].url,
-          imageBuffer: result.images[0].imageBytes ? Buffer.from(result.images[0].imageBytes, 'base64') : null,
+          imageBuffer: imageBytes,
           mimeType: result.images[0].mimeType,
-          provider: 'gemini-vision + imagen-4-reference',
-          model: 'gemini-2.0-flash + imagen-4.0-generate-001',
-          editPrompt: enhancedPrompt,
+          provider: 'gemini-2.5-flash-image',
+          model: 'gemini-2.5-flash-image',
+          editPrompt: editPrompt,
         };
       } catch (referenceError) {
         logger.warn('Reference image not supported, falling back to text-to-image:', referenceError.message);

@@ -10,7 +10,6 @@ const { v4: uuidv4, validate: validateUUID } = require('uuid');
 const validateSession = async (req, res, next) => {
   try {
     const sessionId = req.params.sessionId || req.body.sessionId;
-    console.log("🚀 ~ validateSession ~ sessionId:", sessionId)
 
     if (!sessionId) {
       return res.status(400).json({

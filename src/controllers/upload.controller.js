@@ -10,7 +10,6 @@ const logger = require('../utils/logger');
 const uploadMedia = async (req, res, next) => {
   try {
     const { sessionId } = req.params;
-    console.log("🚀 ~ uploadMedia ~ sessionId:", sessionId)
     const files = req.files || [req.file];
 
     if (!files || files.length === 0) {
@@ -76,7 +75,6 @@ const uploadMedia = async (req, res, next) => {
         size: uploadResult.size,
         uploadedAt: new Date().toISOString(),
       };
-      console.log("🚀 ~ uploadMedia ~ mediaInfo:", mediaInfo)
 
       // Add to session
       await sessionService.addMediaToSession(sessionId, mediaInfo);
@@ -96,7 +94,6 @@ const uploadMedia = async (req, res, next) => {
       const imageData = firstImageFile
         ? { buffer: firstImageFile.buffer, mimeType: firstImageFile.mimetype }
         : null;
-      console.log("🚀 ~ uploadMedia ~ imageData:", imageData)
       
       // Generate caption and hashtags in one fast call (with actual image analysis!)
       const result = await aiService.generateInitialContent(imageData, 'lifestyle');

@@ -49,7 +49,6 @@ Generate now:`;
       if (imageData?.buffer) {
         const base64Image = imageData.buffer.toString('base64');
         const mimeType = imageData.mimeType || this.detectMimeType(imageData.buffer);
-        console.log("🚀 ~ LiteLLMService ~ generateCaptionAndHashtags ~ mimeType:", mimeType)
         parts.push({
           inlineData: {
             mimeType: mimeType,

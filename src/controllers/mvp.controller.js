@@ -11,9 +11,7 @@ const logger = require('../utils/logger');
 const editWithVoice = async (req, res, next) => {
   try {
     const { sessionId } = req.params;
-    console.log("🚀 ~ editWithVoice ~ sessionId:", sessionId)
     const audioFiles = req.files;
-    console.log("🚀 ~ editWithVoice ~ audioFiles:", audioFiles)
 
     // Get session
     const session = await sessionService.getSession(sessionId);
